@@ -1,4 +1,5 @@
 import unittest
+from boto.exception import SQSError
 from boto.sqs.message import Message
 from mock import patch, Mock, PropertyMock
 
@@ -6,33 +7,19 @@ from pyqueue.queue import Queue
 
 
 class QueueTestCase(unittest.TestCase):
-
-    @patch.object(Queue, '_get_queue')
-    # This is the same thing
-    # @patch('pyqueue.queue.Queue._get_queue')
+    @patch('pkg1.queue.Queue._get_queue')
     def test_queue_initialization(self, get_queue_mock):
-        """
-        Can use either path or patch.object as Queue object is
-        imported.
-
-         * To check that a method called only once:
-           `assert_called_once_with`
-         * To check the last call: `assert_called_with`
-         * To check that a particular call is done among other:
-           `assert_any_call`
-
-        """
         queue = Queue('foo')
         get_queue_mock.assert_called_once_with('foo')
         assert queue._queue == get_queue_mock.return_value
 
     # Mock the imported module
-    @patch('pyqueue.queue.connect_to_region')
+    @patch('pkg1.queue.connect_to_region')
     def test_get_queue(self, connect_to_region_mock):
         """
         When mocking object, should be done were it will be used.
         Here connect_to_region comes from boto but it is imported and
-        used in pyqueue.queue
+        used in pkg1.queue
 
         Here connect_to_region returns a connection object from which
         we call the get_queue method. That's why we need the
@@ -54,12 +41,9 @@ class QueueTestCase(unittest.TestCase):
         assert queue._queue == 'bar'
         sqs_connection_mock.get_queue.assert_called_once_with('foo')
 
-    @patch.object(Queue, '_get_queue')
+    @patch('pkg1.queue.Queue._get_queue')
     def test_is_empty_should_return_false(self, get_queue_mock):
         """
-        If you understand the previous examples this test is
-        straightforward.
-
         We create a mocked queue object that will respond to count
         with our value.
         """
@@ -72,8 +56,7 @@ class QueueTestCase(unittest.TestCase):
         assert queue.is_empty is False
 
     @patch('pyqueue.queue.Message', spec=Message)
-    # Notice the argument order
-    @patch.object(Queue, '_get_queue')
+    @patch('pkg1.queue.Queue._get_queue')
     def test_push_multiple_messages(self,
                                     get_queue_mock,
                                     message_mock):
@@ -106,9 +89,9 @@ class QueueTestCase(unittest.TestCase):
         assert queue_mock.write.call_count == 2
         envelope_mock.set_body.assert_any_call('foo')
 
-    @patch.object(Queue, '_get_queue')
+    @patch('pkg1.queue.Queue._get_queue')
     # by default new_callable=Mock
-    @patch.object(Queue, 'is_empty', new_callable=PropertyMock)
+    @patch('pkg1.queue.Queue.is_empty', new_callable=PropertyMock)
     def test_pop_empty_queue_should_return_none(self,
                                                 is_empty_mock,
                                                 get_queue_mock):
@@ -132,3 +115,21 @@ class QueueTestCase(unittest.TestCase):
         assert queue.pop() is None
         assert queue_mock.read.called is False
         is_empty_mock.assert_called_once_with()
+    
+    @patch('pkg1.queue.write')
+    @patch('pkg1.queue.connect_to_region')
+    def test_queue_push_sqs_connection_failed(self, connect_to_region_mock, queue_write_mock):
+        """
+        Connection to SQS can fail due to multiple reasons.
+        Our queue should raise an exception if connection fails.
+
+        """
+        sqs_connection_mock = Mock()
+        sqs_connection_mock.get_queue.return_value = 'bar'
+        queue_write_mock = Mock()
+        queue_write_mock.side_effect = SQSError()
+
+        connect_to_region_mock.return_value = sqs_connection_mock
+
+        queue = Queue('foo')
+        self.assert_raises(queue.push('bar'), SQSError)
